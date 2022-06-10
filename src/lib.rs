@@ -88,7 +88,7 @@
     unstable_features,
     unused_import_braces,
     unused_qualifications,
-    broken_intra_doc_links,
+    rustdoc::broken_intra_doc_links,
     unused_results
 )]
 

@@ -46,6 +46,7 @@ pub struct TypeChecker<V: ContextSensitiveVariant, Var: TcVar> {
     variables: HashMap<Var, TcKey>,
     graph: ConstraintGraph<V>,
     context: V::Context,
+    child_name_map: HashMap<TcKey, (HashMap<String, usize>, usize)>
 }
 
 impl<V: Variant, Var: TcVar> Default for TypeChecker<V, Var> {
@@ -80,7 +81,7 @@ impl<V: Variant, Var: TcVar> TypeChecker<V, Var> {
 impl<V: ContextSensitiveVariant, Var: TcVar> TypeChecker<V, Var> {
     /// Creates a new, empty type checker with the given context.  
     pub fn with_context(context: V::Context) -> Self {
-        TypeChecker { variables: HashMap::new(), graph: ConstraintGraph::new(), context }
+        TypeChecker { variables: HashMap::new(), graph: ConstraintGraph::new(), context, child_name_map: HashMap::new() }
     }
 
     /// Generates a new key representing a term.  
@@ -107,10 +108,45 @@ impl<V: ContextSensitiveVariant, Var: TcVar> TypeChecker<V, Var> {
     /// Contradictions due to this constraint may only occur later when resolving further constraints.
     /// Calling this function several times on a parent with the same `nth` results in the same key.
     pub fn get_child_key(&mut self, parent: TcKey, nth: usize) -> Result<TcKey, TcErr<V>> {
-        let TypeChecker { graph, variables: _, context } = self;
+        let TypeChecker { graph, variables: _, context, child_name_map: _} = self;
         let key = graph.nth_child(parent, nth, &context)?;
         // *self = TypeChecker { graph, variables, context };
         Ok(key)
+    }
+
+    /// Provides a key to the child associated with `name` of the type behind `parent`.
+    /// When implementing more complex types like structs, in many cases you do
+    /// not have a mapping of children to numbers, but to a particular named
+    /// field. This function creates an internal mapping associating a field
+    /// name with a specific index and returns the [TcKey] of the child. 
+    pub fn get_child_key_by_name(&mut self, parent: TcKey, name: String) -> Result<TcKey, TcErr<V>> {
+        let index;
+        let TypeChecker { graph: _, variables: _, context: _, child_name_map} = self;
+        match child_name_map.clone().get_mut(&parent) {
+            Some((field_index_map, next_index)) => {
+                match field_index_map.get(&name) {
+                    Some(&nth) => index = nth,
+                    None =>  {
+                        index = *next_index;
+                        if !field_index_map.insert(name, index).is_none() {
+                            unreachable!("Checked through match");
+                        }
+                        *next_index += 1;
+                    }
+                }
+            },
+            None => {
+                let mut field_index_map = HashMap::new();
+                if !field_index_map.insert(name, 0).is_none() {
+                    unreachable!("HashMap was just created")
+                }
+                if !self.child_name_map.insert(parent, (field_index_map, 0)).is_none() {
+                    unreachable!("Checked through match");
+                }
+                index = 0;
+            }
+        }
+        self.get_child_key(parent, index)
     }
 
     /// Imposes a constraint on keys.  They can be obtained by using the associated functions of [TcKey].
@@ -119,12 +155,12 @@ impl<V: ContextSensitiveVariant, Var: TcVar> TypeChecker<V, Var> {
         match constr {
             Constraint::Conjunction(cs) => cs.into_iter().try_for_each(|c| self.impose(c))?,
             Constraint::Equal(a, b) => {
-                let TypeChecker { graph, variables: _, context } = self;
+                let TypeChecker { graph, variables: _, context, child_name_map: _ } = self;
                 graph.equate(a, b, &context)?;
             }
             Constraint::MoreConc { target, bound } => self.graph.add_upper_bound(target, bound),
             Constraint::MoreConcExplicit(target, bound) => {
-                let TypeChecker { graph, variables: _, context } = self;
+                let TypeChecker { graph, variables: _, context, child_name_map: _ } = self;
                 graph.explicit_bound(target, bound, &context)?;
             }
         }
@@ -167,7 +203,7 @@ impl<V: ContextSensitiveVariant, Var: TcVar> TypeChecker<V, Var> {
     /// For recursive types, the respective [Preliminary] provides access to [crate::TcKey]s refering to their children.
     /// If any constrained caused a contradiction, it will return a [TcErr] containing information about it.
     pub fn type_check_preliminary(self) -> Result<PreliminaryTypeTable<V>, TcErr<V>> {
-        let TypeChecker { graph, variables: _, context } = self;
+        let TypeChecker { graph, variables: _, context, child_name_map: _ } = self;
         graph.solve_preliminary(context)
     }
 }
@@ -182,7 +218,7 @@ where
     /// minimally constrained, constructed type, i.e. [Constructable::Type].  Refer to [TypeChecker::type_check_preliminary()] if [Variant] does not implement [Constructable].
     /// If any constrained caused a contradiction, it will return a [TcErr] containing information about it.
     pub fn type_check(self) -> Result<TypeTable<V>, TcErr<V>> {
-        let TypeChecker { graph, variables: _, context } = self;
+        let TypeChecker { graph, variables: _, context, child_name_map: _ } = self;
         graph.solve(context)
     }
 }
