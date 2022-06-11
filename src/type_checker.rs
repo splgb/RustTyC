@@ -140,7 +140,7 @@ impl<V: ContextSensitiveVariant, Var: TcVar> TypeChecker<V, Var> {
                 if !field_index_map.insert(name, 0).is_none() {
                     unreachable!("HashMap was just created")
                 }
-                if !self.child_name_map.insert(parent, (field_index_map, 0)).is_none() {
+                if !self.child_name_map.insert(parent, (field_index_map, 1)).is_none() {
                     unreachable!("Checked through match");
                 }
                 index = 0;
